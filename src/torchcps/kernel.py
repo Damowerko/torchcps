@@ -62,14 +62,15 @@ class Kernel(ABC):
 
         Args:
             x: (..., x_kernels, n_dimensions)
-            x_weights: (..., x_kernels)
+            x_weights: (..., x_kernels, n_weights)
             y: (..., y_kernels, n_dimensions)
-            y_weights: (..., y_kernels)
+            y_weights: (..., y_kernels, n_weights)
         """
         batch_shape = x.shape[:-2]
         x_kernels = x.shape[-2]
         y_kernels = y.shape[-2]
         n_dimensions = x.shape[-1]
+        n_weights = x_weights.shape[-1]
 
         # check all tensors have appropriate shape
         assert x.shape == (
@@ -80,7 +81,8 @@ class Kernel(ABC):
         assert x_weights.shape == (
             *batch_shape,
             x_kernels,
-        ), f"{x_weights.shape} != {(*batch_shape, x_kernels)}"
+            n_weights,
+        ), f"{x_weights.shape} != {(*batch_shape, x_kernels, n_weights)}"
         assert y.shape == (
             *batch_shape,
             y_kernels,
@@ -89,11 +91,12 @@ class Kernel(ABC):
         assert y_weights.shape == (
             *batch_shape,
             y_kernels,
-        ), f"{y_weights.shape} != {(*batch_shape, y_kernels)}"
+            n_weights,
+        ), f"{y_weights.shape} != {(*batch_shape, y_kernels, n_weights)}"
 
         # For each batch element compute the kernel inner product
         K_ij = self.kernel(x, y)
-        output = x_weights[..., None, :] @ (K_ij @ y_weights[..., :, None])
+        output = x_weights.transpose(-1, -2) @ (K_ij @ y_weights)
         return output.squeeze(-1).squeeze(-1)
 
 
