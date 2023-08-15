@@ -3,8 +3,7 @@ from typing import Callable, NamedTuple
 import torch
 import torch.linalg
 import torch.nn as nn
-import torch.nn.functional as F
-from pykeops.torch import LazyTensor, Vi, Vj
+from pykeops.torch import KernelSolve, LazyTensor
 
 from .kernel import Kernel
 
@@ -67,19 +66,20 @@ class KernelConv(nn.Module):
             filter_kernels = self.kernel_positions.shape[2]
         else:
             self.kernel_positions = nn.Parameter(
-                kernel_spread
+                2
+                * kernel_spread
                 * torch.randn((in_channels, out_channels, filter_kernels, n_dimensions))
             )
         self.kernel_weights = nn.Parameter(
             torch.empty(in_channels, out_channels, filter_kernels, n_weights)
         )
-        nn.init.xavier_uniform_(self.kernel_weights)
+        nn.init.kaiming_normal_(self.kernel_weights)
 
     def forward(self, input: RKHS):
         """
         Args:
             input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
-            input_weights: (batch_size, in_channels, in_kernels, n_kernel_diemsnions)
+            input_weights: (batch_size, in_channels, in_kernels, n_weights)
         """
         input_positions, input_weights = input
         (
@@ -90,7 +90,7 @@ class KernelConv(nn.Module):
         ) = self.kernel_positions.shape
         batch_size, _, in_kernels, _ = input_positions.shape
         out_kernels = in_channels * in_kernels * filter_kernels
-        _, _, _, n_kernel_diemsnions = self.kernel_weights.shape
+        _, _, _, n_weights = self.kernel_weights.shape
 
         # sanity checks
         assert (
@@ -109,8 +109,8 @@ class KernelConv(nn.Module):
             n_dimensions == input_positions.shape[3]
         ), f"{n_dimensions} != {input_positions.shape[3]}"
         assert (
-            n_kernel_diemsnions == input_weights.shape[3]
-        ), f"{n_kernel_diemsnions} != {input_weights.shape[3]}"
+            n_weights == input_weights.shape[3]
+        ), f"{n_weights} != {input_weights.shape[3]}"
 
         # (batch_size, in_channels, 1, in_kernels, 1, n_dimensions)
         input_positions = input_positions.unsqueeze(2).unsqueeze(4)
@@ -133,9 +133,8 @@ class KernelConv(nn.Module):
         # to combine dimensions they must be contiguous so we swap in_channels and out_channels
         output_weights = output_weights.transpose(1, 2)
         output_weights = output_weights.reshape(
-            batch_size, out_channels, out_kernels, n_kernel_diemsnions
+            batch_size, out_channels, out_kernels, n_weights
         )
-
         return RKHS(output_positions, output_weights)
 
 
@@ -152,62 +151,113 @@ class KernelMap(nn.Module):
     def forward(self, input: RKHS):
         """
         Args:
-            input_positions: (batch_size, in_kernels, in_channels, n_dimensions)
-            input_weights: (batch_size, in_kernels, in_channels)
+            input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, in_channels, in_kernels)
         """
         output_weights = self.nonlinearity(input.weights)
         return RKHS(input.positions, output_weights)
 
 
-class KernelMix(nn.Module):
+class KernelGNN(nn.Module):
     def __init__(
         self,
         kernel: Kernel,
         in_weights: int,
         out_weights: int,
+        filter_taps: int,
         normalize=True,
     ) -> None:
         super().__init__()
         self.kernel = kernel
         self.normalize = normalize
-        self.linear = nn.Linear(in_weights, out_weights)
+        self.filter_taps = filter_taps
+        self.in_weights = in_weights
+        self.out_weights = out_weights
+        self.linear = nn.Linear((filter_taps + 1) * in_weights, out_weights)
 
     def forward(self, input: RKHS):
         """
         Args:
-            input_positions: (batch_size, in_kernels, n_channels, n_dimensions)
-            input_weights: (batch_size, in_kernels, n_channels, in_weights)
+            input_positions: (batch_size, n_channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, n_channels, in_kernels, in_weights)
         """
+        batch_size, n_channels, in_kernels, in_weights = input.weights.shape
         K = self.kernel(input.positions, input.positions)
-        if self.normalize:
-            degree_sq = K.sum(3).pow(2)
-            output_weights = (K @ (input.weights / degree_sq)) / degree_sq
-        else:
-            output_weights = K @ input.weights  # apply the linear layer to the weights
-        output_weights = self.linear(output_weights)
+        xs = [input.weights]
+        for _ in range(self.filter_taps):
+            if self.normalize:
+                degree_sq = K.sum(3).pow(2)
+                x = (K @ (xs[-1] / degree_sq)) / degree_sq
+            else:
+                x = K @ xs[-1]
+            assert isinstance(
+                x, torch.Tensor
+            ), f"Expected type torch.Tensor but got {type(x)} instead."
+            xs += [x]
+        # Apply GNN weights
+        output_weights = self.linear(
+            torch.stack(xs, dim=4).reshape(
+                batch_size,
+                n_channels,
+                in_kernels,
+                (self.filter_taps + 1) * in_weights,
+            )
+        )
         return RKHS(input.positions, output_weights)
 
 
-class KernelPool(nn.Module):
-    strategies = ["largest", "ransac"]
+class KernelNorm(nn.Module):
+    def __init__(self, n_channels: int, n_weights: int) -> None:
+        super().__init__()
+        self.n_channels = n_channels
+        self.n_weights = n_weights
+        self.batch_norm = nn.BatchNorm1d(n_channels * n_weights)
 
+    def forward(self, input: RKHS):
+        """
+        Args:
+            input_positions: (batch_size, n_channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, n_channels, in_kernels, in_weights)
+        """
+        batch_size, n_channels, in_kernels, n_weights = input.weights.shape
+        assert (
+            n_channels == self.n_channels
+        ), f"Unexpected number of channels {n_channels} != {self.n_channels}"
+        assert (
+            n_weights == self.n_weights
+        ), f"Unexpected number of weights {n_weights} != {self.n_weights}"
+
+        weights: torch.Tensor = input.weights.transpose(2, 3).reshape(
+            batch_size, n_channels * n_weights, in_kernels
+        )
+        weights = self.batch_norm(weights)
+        weights = (
+            weights.reshape(batch_size, n_channels, n_weights, in_kernels)
+            .transpose(2, 3)
+            .clone()
+        )
+        return RKHS(input.positions, weights)
+
+
+class KernelPool(nn.Module):
     def __init__(
         self,
         out_kernels: int,
-        # kernel: Kernel,
-        # nonlinearity: nn.Module | None = None,
+        kernel: Kernel,
+        nonlinearity: nn.Module | None = None,
         strategy="largest",
         max_iter=100,
+        alpha=1e-6,
+        fit=True,
     ) -> None:
         super().__init__()
         self.out_kernels = out_kernels
-        # self.kernel = kernel
-        # self.nonlinearity = nonlinearity
+        self.kernel = kernel
+        self.nonlinearity = nonlinearity
         self.strategy = strategy
         self.max_iter = max_iter
-
-        if strategy not in self.strategies:
-            raise ValueError(f"Unknown strategy {strategy}.")
+        self.alpha = alpha
+        self.fit = fit
 
     def forward(self, input: RKHS):
         """
@@ -221,6 +271,8 @@ class KernelPool(nn.Module):
             indices = None
         elif self.strategy == "largest":
             indices = self._largest(input_positions, input_weights)
+        elif self.strategy == "random":
+            indices = self._random(input_positions, input_weights)
         elif self.strategy == "ransac":
             indices = self._ransac(input_positions, input_weights)
         else:
@@ -241,14 +293,16 @@ class KernelPool(nn.Module):
             output_positions = input_positions
             output_weights = input_weights
 
-        # # Find weights for new positions and nonlinearity
-        # output_weights = fit_kernel_weights(
-        #     input_positions,
-        #     input_weights,
-        #     output_positions,
-        #     self.kernel,
-        #     self.nonlinearity,
-        # )
+        # Find weights for new positions and nonlinearity
+        if self.fit:
+            output_weights = fit_kernel_weights(
+                input_positions,
+                input_weights,
+                output_positions,
+                self.kernel,
+                self.nonlinearity,
+                self.alpha,
+            )
         return RKHS(output_positions, output_weights)
 
     def _largest(
@@ -261,12 +315,28 @@ class KernelPool(nn.Module):
             input_positions: (batch_size, channels, in_kernels, n_dimensions)
             input_weights: (batch_size, channels, in_kernels, n_weights)
         """
-        with torch.no_grad():
-            # take the norm of the weight vectors
-            weights_norm = input_weights.norm(dim=3)
-            # find the top-k largest weights in magnitude in each channel and batch
-            _, indices = torch.topk(weights_norm, dim=2, k=self.out_kernels)
+        # take the norm of the weight vectors
+        weights_norm = input_weights.norm(dim=3)
+        # find the top-k largest weights in magnitude in each channel and batch
+        _, indices = torch.topk(weights_norm, dim=2, k=self.out_kernels)
         return indices
+
+    def _random(
+        self,
+        input_positions: torch.Tensor,
+        input_weights: torch.Tensor,
+    ):
+        """
+        Args:
+            input_positions: (batch_size, channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, channels, in_kernels, n_weights)
+        """
+        with torch.no_grad():
+            device = input_weights.device
+            batch_size, channels, in_kernels, _ = input_positions.shape
+            random = torch.rand(batch_size, channels, in_kernels, device=device)
+            _, indices = torch.topk(random, self.out_kernels, dim=2)
+            return indices
 
     def _ransac(
         self,
@@ -278,38 +348,35 @@ class KernelPool(nn.Module):
             input_positions: (batch_size, channels, in_kernels, n_dimensions)
             input_weights: (batch_size, channels, in_kernels)
         """
-        with torch.no_grad():
-            device = input_positions.device
-            batch_size, channels, _, n_dimensions = input_positions.shape
-            best_indices = torch.empty(
-                batch_size, channels, self.out_kernels, dtype=torch.long, device=device
+        device = input_positions.device
+        batch_size, channels, _, n_dimensions = input_positions.shape
+        best_indices = torch.empty(
+            batch_size, channels, self.out_kernels, dtype=torch.long, device=device
+        )
+        best_product = torch.full((batch_size, channels), -float("inf"), device=device)
+        for _ in range(self.max_iter):
+            _, random_indices = torch.topk(
+                torch.rand(input_weights.shape, device=device),
+                dim=2,
+                k=self.out_kernels,
             )
-            best_product = torch.full(
-                (batch_size, channels), -float("inf"), device=device
+            output_weights = torch.gather(input_weights, 2, random_indices)
+            output_positions = torch.gather(
+                input_positions,
+                2,
+                random_indices[..., None].expand(-1, -1, -1, n_dimensions),
             )
-            for _ in range(self.max_iter):
-                _, random_indices = torch.topk(
-                    torch.rand(input_weights.shape, device=device),
-                    dim=2,
-                    k=self.out_kernels,
-                )
-                output_weights = torch.gather(input_weights, 2, random_indices)
-                output_positions = torch.gather(
-                    input_positions,
-                    2,
-                    random_indices[..., None].expand(-1, -1, -1, n_dimensions),
-                )
-                # (batch_size, channels)
-                products = self.kernel.inner(
-                    input_positions,
-                    input_weights,
-                    output_positions,
-                    output_weights,
-                )
-                # want to maximize the inner product
-                better_mask = products > best_product
-                best_product[better_mask] = products[better_mask]
-                best_indices[better_mask] = random_indices[better_mask]
+            # (batch_size, channels)
+            products = self.kernel.inner(
+                input_positions,
+                input_weights,
+                output_positions,
+                output_weights,
+            )
+            # want to maximize the inner product
+            better_mask = products > best_product
+            best_product[better_mask] = products[better_mask]
+            best_indices[better_mask] = random_indices[better_mask]
         return best_indices
 
 
@@ -319,7 +386,8 @@ def fit_kernel_weights(
     output_positions: torch.Tensor,
     kernel: Kernel,
     nonlinearity: Callable | None = None,
-):
+    alpha=1e-3,
+) -> torch.Tensor:
     """
     Fit a new RKHS that has fewer kernels than the input RKHS. The new kernels are positioned at `output_positions`.
     1. Sample kernel at `output_positions`.
@@ -327,17 +395,19 @@ def fit_kernel_weights(
 
     Args:
         input_positions: (batch_size, channels, in_kernels, n_dimensions)
-        input_weights: (batch_size, channels, in_kernels)
+        input_weights: (batch_size, channels, in_kernels, n_weights)
         output_positions: (batch_size, channels, out_kernels, n_dimensions)
         kernel: kernel function
-        alpha: Non-negative regularization parameter.
+        nonlinearity: nonlinearity to apply to the kernel weights
     """
     batch_size, channels, in_kernels, n_dimensions = input_positions.shape
     _, _, out_kernels, _ = output_positions.shape
+    _, _, _, n_weights = input_weights.shape
     assert input_weights.shape == (
         batch_size,
         channels,
         in_kernels,
+        n_weights,
     ), f"{input_weights.shape} != {(batch_size, channels, in_kernels)}"
     assert output_positions.shape == (
         batch_size,
@@ -348,7 +418,7 @@ def fit_kernel_weights(
 
     # sample kernel at output positions
     # (batch_size, channels, out_kernels, in_kernels)
-    samples = kernel(output_positions, input_positions) @ input_weights[..., None]
+    samples = kernel(output_positions, input_positions) @ input_weights
     if nonlinearity is not None:
         samples = nonlinearity(samples)
 
@@ -356,6 +426,6 @@ def fit_kernel_weights(
     if isinstance(K, torch.Tensor):
         raise NotImplementedError()
     assert 0 not in K.shape, f"K is not invertible with shape: {K.shape}"
-
-    weights = K.solve(LazyTensor(samples[..., :, None]), eps=0.1)
-    return weights.squeeze(-1)
+    weights = K.solve(LazyTensor(samples[..., :, None, :]), alpha=alpha)
+    assert isinstance(weights, torch.Tensor)
+    return weights
