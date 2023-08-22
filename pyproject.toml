@@ -10,7 +10,7 @@ python = "^3.11,<3.12"
 pytorch-lightning = "^2.0.5"
 numpy = "^1.25.1"
 torch-geometric = "^2.3.1"
-torch = "^2.0.1"
+torch = {version = ">=2.0.0, !=2.0.1"}
 pykeops = "^2.1.2"
 matplotlib = "^3.7.2"
 seaborn = "^0.12.2"
@@ -29,7 +29,7 @@ black = "^23.7.0"
 [[tool.poetry.source]]
 name = "geometric"
 url = "https://data.pyg.org/whl/torch-2.0.1+cu118.html"
-priority = "primary"
+priority = "default"
 
 [build-system]
 requires = ["poetry-core"]
