@@ -56,14 +56,20 @@ class ParametricGNN(nn.Module):
         group.add_argument(
             "--residual_type",
             type=str,
-            default="res",
+            default="res+",
             choices=["res", "res+", "dense", "plain"],
             help="Type of residual connection to use.",
+        )
+        group.add_argument(
+            "--heads",
+            type=int,
+            default=1,
+            help="Number of attention heads to use.",
         )
 
     def __init__(
         self,
-        in_channels: int,
+        in_channels: int | tuple[int, int],
         out_channels: int,
         n_edges: int,
         n_layers: int = 2,
@@ -73,7 +79,8 @@ class ParametricGNN(nn.Module):
         mlp_per_gnn_layers: int = 0,
         mlp_hidden_channels: int = 256,
         dropout: float = 0.0,
-        residual_type: str = "res",
+        residual_type: str = "res+",
+        heads: int = 1,
         **kwargs,
     ):
         """
@@ -99,6 +106,9 @@ class ParametricGNN(nn.Module):
         if mlp_read_layers < 1:
             raise ValueError("mlp_read_layers must be >= 1.")
 
+        # ensure that dropout is a float
+        dropout = float(dropout)
+
         # Readin MLP: Changes the number of features from in_channels to n_channels
         self.readin = gnn.MLP(
             in_channels=in_channels,
@@ -123,22 +133,27 @@ class ParametricGNN(nn.Module):
 
         # GNN layers operate on n_channels features
         gnn_layers = []
-        for _ in range(n_layers):
+        for i in range(n_layers):
+            first_layer = i == 0
             conv = gnn.Sequential(
                 "x, edge_index, edge_weights",
                 [
                     (
                         gnn.GATv2Conv(
-                            in_channels=n_channels,
+                            in_channels=n_channels * heads
+                            if not first_layer and mlp_per_gnn_layers == 0
+                            else in_channels,
                             out_channels=n_channels,
+                            heads=heads,
                             edge_dim=n_edges,
                             dropout=dropout,
+                            add_self_loops=False,
                         ),
                         "x, edge_index, edge_weights -> x",
                     ),
                     (
                         gnn.MLP(
-                            in_channels=n_channels,
+                            in_channels=n_channels * heads,
                             hidden_channels=mlp_hidden_channels,
                             out_channels=n_channels,
                             num_layers=mlp_per_gnn_layers,
