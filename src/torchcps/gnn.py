@@ -69,7 +69,7 @@ class ParametricGNN(nn.Module):
 
     def __init__(
         self,
-        in_channels: int | tuple[int, int],
+        in_channels: int,
         out_channels: int,
         n_edges: int,
         n_layers: int = 2,
