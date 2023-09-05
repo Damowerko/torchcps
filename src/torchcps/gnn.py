@@ -168,7 +168,7 @@ class ParametricGNN(nn.Module):
                 (
                     gnn.DeepGCNLayer(
                         conv=conv,
-                        norm=gnn.BatchNorm(n_channels),
+                        norm=gnn.BatchNorm(n_channels * heads),
                         act=activation(),
                         block=residual_type,
                         dropout=dropout,
