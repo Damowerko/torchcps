@@ -152,7 +152,7 @@ class ParametricGNN(nn.Module):
                         gnn.MLP(
                             in_channels=n_channels * heads,
                             hidden_channels=mlp_hidden_channels,
-                            out_channels=n_channels,
+                            out_channels=n_channels * heads,
                             num_layers=mlp_per_gnn_layers,
                             dropout=dropout,
                             act=activation(),
