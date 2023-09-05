@@ -106,9 +106,6 @@ class ParametricGNN(nn.Module):
         if mlp_read_layers < 1:
             raise ValueError("mlp_read_layers must be >= 1.")
 
-        if mlp_per_gnn_layers < 1:
-            raise ValueError("mlp_per_gnn_layers must be >= 1.")
-
         # ensure that dropout is a float
         dropout = float(dropout)
 
@@ -116,7 +113,7 @@ class ParametricGNN(nn.Module):
         self.readin = gnn.MLP(
             in_channels=in_channels,
             hidden_channels=mlp_hidden_channels,
-            out_channels=n_channels,
+            out_channels=n_channels * heads,
             num_layers=mlp_read_layers,
             dropout=dropout,
             act=activation(),
@@ -125,7 +122,7 @@ class ParametricGNN(nn.Module):
 
         # Readout MLP: Changes the number of features from n_channels to out_channels
         self.readout = gnn.MLP(
-            in_channels=n_channels,
+            in_channels=n_channels * heads,
             hidden_channels=mlp_hidden_channels,
             out_channels=out_channels,
             num_layers=mlp_read_layers,
@@ -142,7 +139,7 @@ class ParametricGNN(nn.Module):
                 [
                     (
                         gnn.GATv2Conv(
-                            in_channels=n_channels,
+                            in_channels=n_channels * heads,
                             out_channels=n_channels,
                             heads=heads,
                             edge_dim=n_edges,
