@@ -3,7 +3,7 @@ from typing import Callable, NamedTuple
 import torch
 import torch.linalg
 import torch.nn as nn
-from pykeops.torch import KernelSolve, LazyTensor
+from pykeops.torch import LazyTensor
 
 from .kernel import Kernel
 
