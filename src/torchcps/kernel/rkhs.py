@@ -1,11 +1,25 @@
 from abc import ABC, abstractmethod
+from typing import NamedTuple
 
 import torch
 import torch.linalg
 from pykeops.torch import LazyTensor
 
 
+class Mixture(NamedTuple):
+    """
+    Represents the positions and weights for a mixture of kernels.
+    """
+
+    positions: torch.Tensor
+    weights: torch.Tensor
+
+
 class Kernel(ABC):
+    """
+    Represents a kernel function. Together with a Mixture it defines a Reproducing Kernel Hilbert Space (RKHS).
+    """
+
     def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor | LazyTensor:
         return self.kernel(x, y)
 

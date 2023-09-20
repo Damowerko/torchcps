@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from torchcps.kernel import GaussianKernel
-from torchcps.kernel_cnn import RKHS, KernelConv, KernelPool
+from torchcps.kernel.nn import KernelConv, KernelPool
+from torchcps.kernel.rkhs import GaussianKernel, Mixture
 
 pytestmark = pytest.mark.parametrize(
     "batch_size, in_channels, in_kernels, n_dimensions",
@@ -16,7 +16,7 @@ pytestmark = pytest.mark.parametrize(
 def random_input(batch_size, in_channels, in_kernels, n_dimensions):
     input_positions = torch.randn(batch_size, in_channels, in_kernels, n_dimensions)
     input_weights = torch.randn(batch_size, in_channels, in_kernels, 1)
-    return RKHS(input_positions, input_weights)
+    return Mixture(input_positions, input_weights)
 
 
 def test_forward(batch_size, in_channels, in_kernels, n_dimensions):

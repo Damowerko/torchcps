@@ -5,12 +5,7 @@ import torch.linalg
 import torch.nn as nn
 from pykeops.torch import LazyTensor
 
-from .kernel import Kernel
-
-
-class RKHS(NamedTuple):
-    positions: torch.Tensor
-    weights: torch.Tensor
+from .rkhs import Kernel, Mixture
 
 
 class KernelConv(nn.Module):
@@ -75,7 +70,7 @@ class KernelConv(nn.Module):
         )
         nn.init.kaiming_normal_(self.kernel_weights)
 
-    def forward(self, input: RKHS):
+    def forward(self, input: Mixture):
         """
         Args:
             input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
@@ -135,30 +130,12 @@ class KernelConv(nn.Module):
         output_weights = output_weights.reshape(
             batch_size, out_channels, out_kernels, n_weights
         )
-        return RKHS(output_positions, output_weights)
+        return Mixture(output_positions, output_weights)
 
 
-class KernelMap(nn.Module):
-    def __init__(self, nonlinearity: nn.Module) -> None:
-        """
-        Args:
-            nonlinearity: nonlinearity to apply to the kernel weights
-        """
+class KernelGraphFilter(nn.Module):
+    """Propagate the kernel weights using a GNN; multiply by the GSO."""
 
-        super().__init__()
-        self.nonlinearity = nonlinearity
-
-    def forward(self, input: RKHS):
-        """
-        Args:
-            input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
-            input_weights: (batch_size, in_channels, in_kernels)
-        """
-        output_weights = self.nonlinearity(input.weights)
-        return RKHS(input.positions, output_weights)
-
-
-class KernelGNN(nn.Module):
     def __init__(
         self,
         kernel: Kernel,
@@ -175,26 +152,34 @@ class KernelGNN(nn.Module):
         self.out_weights = out_weights
         self.linear = nn.Linear((filter_taps + 1) * in_weights, out_weights)
 
-    def forward(self, input: RKHS):
+    def forward(self, input: Mixture):
         """
         Args:
             input_positions: (batch_size, n_channels, in_kernels, n_dimensions)
             input_weights: (batch_size, n_channels, in_kernels, in_weights)
         """
         batch_size, n_channels, in_kernels, in_weights = input.weights.shape
-        K = self.kernel(input.positions, input.positions)
+
+        # The kernel matrix is the GSO
+        # Will contain self-loops by definition
+        S = self.kernel(input.positions, input.positions)
+
+        # Computer powers of the kernel times x
+        # xs = [K x, K^2 x, ...]
         xs = [input.weights]
         for _ in range(self.filter_taps):
             if self.normalize:
-                degree_sq = K.sum(3).pow(2)
-                x = (K @ (xs[-1] / degree_sq)) / degree_sq
+                # Normalize GSO to: S_norm = D^{-1/2} S D^{-1/2}
+                degree_sqrt = S.sum(3).pow(0.5)
+                x = (S @ (xs[-1] / degree_sqrt)) / degree_sqrt
             else:
-                x = K @ xs[-1]
+                x = S @ xs[-1]
             assert isinstance(
                 x, torch.Tensor
             ), f"Expected type torch.Tensor but got {type(x)} instead."
             xs += [x]
-        # Apply GNN weights
+
+        # Perform graph filters
         output_weights = self.linear(
             torch.stack(xs, dim=4).reshape(
                 batch_size,
@@ -203,17 +188,43 @@ class KernelGNN(nn.Module):
                 (self.filter_taps + 1) * in_weights,
             )
         )
-        return RKHS(input.positions, output_weights)
+        return Mixture(input.positions, output_weights)
+
+
+class KernelMap(nn.Module):
+    """Apply a transformation to the kernel weights."""
+
+    def __init__(self, transformation: nn.Module) -> None:
+        """
+        Args:
+            transformation: function to apply to the kernel weights.
+                input -> (batch_size, in_channels, in_kernels)
+                output -> (batch_size, in_channels, in_kernels)
+        """
+
+        super().__init__()
+        self.transformation = transformation
+
+    def forward(self, input: Mixture):
+        """
+        Args:
+            input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, in_channels, in_kernels)
+        """
+        output_weights = self.transformation(input.weights)
+        return Mixture(input.positions, output_weights)
 
 
 class KernelNorm(nn.Module):
+    """Apply batch normalization to the kernel weights."""
+
     def __init__(self, n_channels: int, n_weights: int) -> None:
         super().__init__()
         self.n_channels = n_channels
         self.n_weights = n_weights
         self.batch_norm = nn.BatchNorm1d(n_channels * n_weights)
 
-    def forward(self, input: RKHS):
+    def forward(self, input: Mixture):
         """
         Args:
             input_positions: (batch_size, n_channels, in_kernels, n_dimensions)
@@ -236,10 +247,12 @@ class KernelNorm(nn.Module):
             .transpose(2, 3)
             .clone()
         )
-        return RKHS(input.positions, weights)
+        return Mixture(input.positions, weights)
 
 
 class KernelPool(nn.Module):
+    """Reduce then number of kernels."""
+
     def __init__(
         self,
         out_kernels: int,
@@ -259,7 +272,7 @@ class KernelPool(nn.Module):
         self.alpha = alpha
         self.fit = fit
 
-    def forward(self, input: RKHS):
+    def forward(self, input: Mixture):
         """
         Args:
             input_positions: (batch_size, channels, in_kernels, n_dimensions)
@@ -303,7 +316,7 @@ class KernelPool(nn.Module):
                 self.nonlinearity,
                 self.alpha,
             )
-        return RKHS(output_positions, output_weights)
+        return Mixture(output_positions, output_weights)
 
     def _largest(
         self,
