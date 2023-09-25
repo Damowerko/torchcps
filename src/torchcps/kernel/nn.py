@@ -198,8 +198,8 @@ class KernelMap(nn.Module):
         """
         Args:
             transformation: function to apply to the kernel weights.
-                input -> (batch_size, in_channels, in_kernels)
-                output -> (batch_size, in_channels, in_kernels)
+                input -> (batch_size, in_channels, in_kernels, in_weights)
+                output -> (batch_size, in_channels, in_kernels, in_weights)
         """
 
         super().__init__()
@@ -209,7 +209,7 @@ class KernelMap(nn.Module):
         """
         Args:
             input_positions: (batch_size, in_channels, in_kernels, n_dimensions)
-            input_weights: (batch_size, in_channels, in_kernels)
+            input_weights: (batch_size, in_channels, in_kernels, in_weights)
         """
         output_weights = self.transformation(input.weights)
         return Mixture(input.positions, output_weights)
