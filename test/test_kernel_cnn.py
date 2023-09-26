@@ -51,7 +51,7 @@ def test_forward(batch_size, in_channels, in_kernels, n_dimensions):
 def test_pool(batch_size, in_kernels, in_channels, n_dimensions):
     input = random_input(batch_size, in_channels, in_kernels, n_dimensions)
     max_kernels = 2
-    layer = KernelPool(max_kernels, strategy="largest")
+    layer = KernelPool(max_kernels, GaussianKernel(), strategy="largest")
     output_positions, output_weights = layer(input)
     assert output_positions.shape == (
         batch_size,
