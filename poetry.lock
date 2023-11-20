@@ -3447,6 +3447,34 @@ typing-extensions = "*"
 opt-einsum = ["opt-einsum (>=3.3)"]
 
 [[package]]
+name = "torch-cluster"
+version = "1.6.3+pt20cu118"
+description = "PyTorch Extension Library of Optimized Graph Cluster Algorithms"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "torch_cluster-1.6.3+pt20cu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:faee041e9a16c73835bc25f40ac8c6e364d899ed402eb56ce7469ae1407c47bd"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp310-cp310-win_amd64.whl", hash = "sha256:9be245de720bc7a639c51a0c413ea5eb763efe1681af2b6f9b03e2715fc95f8f"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp311-cp311-linux_x86_64.whl", hash = "sha256:8fcc9a08b8f7ab24f63ea47bccac5c31e88ecc19dbfc98e5d73901504015c024"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp311-cp311-win_amd64.whl", hash = "sha256:decba335cfdb507e7a8b5d059314d29768682c9b8b59c8b8c6ab5af1c0e60c88"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp38-cp38-linux_x86_64.whl", hash = "sha256:9918492eae65f12354bf4039f03343377d45f66515addfb4f29f0b215cbd03da"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp38-cp38-win_amd64.whl", hash = "sha256:05352a750287846f1ba3d183372dea25e78e23c9906c95d15216f6300bd824a6"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp39-cp39-linux_x86_64.whl", hash = "sha256:303188600beb4eb926cec96445bfcbc64b33571395cb334181395921d09c8c97"},
+    {file = "torch_cluster-1.6.3+pt20cu118-cp39-cp39-win_amd64.whl", hash = "sha256:7bbf67bdf81edab9889a4b6b5abc93e91ae905c372a19efe1da305554a3b427e"},
+]
+
+[package.dependencies]
+scipy = "*"
+
+[package.extras]
+test = ["pytest", "pytest-cov"]
+
+[package.source]
+type = "legacy"
+url = "https://data.pyg.org/whl/torch-2.0.0+cu118.html"
+reference = "pyg"
+
+[[package]]
 name = "torch-geometric"
 version = "2.3.1"
 description = "Graph Neural Network Library for PyTorch"
@@ -3843,4 +3871,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11,<3.12"
-content-hash = "11e0db1d001953a156f58f8a0145be49745b4098340b1f95de10eae54d7298de"
+content-hash = "3b733017ffaac31c35fe38d05400489d1368bdc9ae44283f16d4198b640cfd18"
