@@ -29,7 +29,9 @@ class SpatialSelfAttention(gnn.MessagePassing):
         self.lin_v = nn.Linear(in_channels, out_channels * heads)
         self.lin_pos = nn.Linear(pos_dim, out_channels * heads, bias=False)
 
-    def forward(self, x: torch.Tensor, pos: torch.Tensor, edge_index: Adj):
+    def forward(
+        self, x: torch.Tensor, pos: torch.Tensor, edge_index: Adj
+    ) -> torch.Tensor:
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
