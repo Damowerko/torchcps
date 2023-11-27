@@ -9,25 +9,15 @@ from torch_geometric.utils import softmax
 
 
 class SpatialAttention(gnn.MessagePassing):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        pos_dim: int,
-        heads=1,
-        dropout=0.0,
-        **kwargs
-    ):
+    def __init__(self, n_channels: int, pos_dim: int, heads=1, dropout=0.0, **kwargs):
         super().__init__(aggr="add", **kwargs)
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.n_channels = n_channels
         self.heads = heads
         self.dropout = dropout
-
-        self.lin_q = nn.Linear(in_channels, out_channels * heads)
-        self.lin_k = nn.Linear(in_channels, out_channels * heads)
-        self.lin_v = nn.Linear(in_channels, out_channels * heads)
-        self.lin_pos = nn.Linear(pos_dim, out_channels * heads, bias=False)
+        self.lin_q = nn.Linear(n_channels * heads, n_channels * heads)
+        self.lin_k = nn.Linear(n_channels * heads, n_channels * heads)
+        self.lin_v = nn.Linear(n_channels * heads, n_channels * heads)
+        self.lin_pos = nn.Linear(pos_dim, n_channels * heads, bias=False)
 
     def forward(
         self,
@@ -72,16 +62,16 @@ class SpatialAttention(gnn.MessagePassing):
         # add positional encoding
         key_j += self.lin_pos(pos_i - pos_j)
         # reshape to separate heads and channels
-        query_i = query_i.view(-1, self.heads, self.out_channels)
-        key_j = key_j.view(-1, self.heads, self.out_channels)
-        value_j = value_j.view(-1, self.heads, self.out_channels)
+        query_i = query_i.view(-1, self.heads, self.n_channels)
+        key_j = key_j.view(-1, self.heads, self.n_channels)
+        value_j = value_j.view(-1, self.heads, self.n_channels)
         # inner product between query and key
         alpha = (
-            torch.einsum("...hc,...hc->...h", query_i, key_j) / self.out_channels**0.5
+            torch.einsum("...hc,...hc->...h", query_i, key_j) / self.n_channels**0.5
         )
         # softmax implementation from torch_geometric
         alpha = softmax(alpha, index, ptr, size_i, dim=0)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
         out = value_j * alpha.view(-1, self.heads, 1)
-        out = out.view(-1, self.heads * self.out_channels)
+        out = out.view(-1, self.heads * self.n_channels)
         return out

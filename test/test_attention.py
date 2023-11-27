@@ -16,16 +16,15 @@ def data():
 
 
 def test_self_forward(data):
-    in_channels = 16
-    out_channels = 32
+    n_channels = 8
     pos_dim = 2
-    heads = 4
+    heads = 2
     dropout = 0.2
 
-    attention = SpatialAttention(in_channels, out_channels, pos_dim, heads, dropout)
+    attention = SpatialAttention(n_channels, pos_dim, heads, dropout)
     output = attention(data.x, data.pos, data.edge_index)
 
-    assert output.shape == (data.num_nodes, heads * out_channels)  # Check output shape
+    assert output.shape == (data.num_nodes, heads * n_channels)  # Check output shape
 
 
 def test_cross_forward():
@@ -38,13 +37,12 @@ def test_cross_forward():
     pos_y = torch.randn(n_y, 2)
     edge_index = radius(x, y, r=0.5)
 
-    in_channels = 16
-    out_channels = 32
+    n_channels = 8
     pos_dim = 2
-    heads = 4
+    heads = 2
     dropout = 0.2
 
-    attention = SpatialAttention(in_channels, out_channels, pos_dim, heads, dropout)
+    attention = SpatialAttention(n_channels, pos_dim, heads, dropout)
     output = attention(
         (x, y),
         (pos_x, pos_y),
@@ -53,21 +51,20 @@ def test_cross_forward():
 
     assert output.shape == (
         n_y,
-        heads * out_channels,
+        heads * n_channels,
     )
 
 
 def test_message(data):
-    in_channels = 16
-    out_channels = 32
+    n_channels = 8
     pos_dim = 2
-    heads = 4
+    heads = 2
     dropout = 0.2
 
-    attention = SpatialAttention(in_channels, out_channels, pos_dim, heads, dropout)
-    query_i = torch.randn(data.num_edges, heads * out_channels)
-    key_j = torch.randn(data.num_edges, heads * out_channels)
-    value_j = torch.randn(data.num_edges, heads * out_channels)
+    attention = SpatialAttention(n_channels, pos_dim, heads, dropout)
+    query_i = torch.randn(data.num_edges, heads * n_channels)
+    key_j = torch.randn(data.num_edges, heads * n_channels)
+    value_j = torch.randn(data.num_edges, heads * n_channels)
     pos_i = data.pos[data.edge_index[0]]
     pos_j = data.pos[data.edge_index[1]]
     index = data.edge_index[0]
@@ -78,4 +75,4 @@ def test_message(data):
         query_i, key_j, value_j, pos_i, pos_j, index, ptr, size_i
     )
 
-    assert output.shape == (data.num_edges, heads * out_channels)  # Check output shape
+    assert output.shape == (data.num_edges, heads * n_channels)  # Check output shape
