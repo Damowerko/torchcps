@@ -4,11 +4,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
-from torch_geometric.typing import Adj, OptTensor
+from torch_geometric.typing import Adj, OptTensor, PairTensor
 from torch_geometric.utils import softmax
 
 
-class SpatialSelfAttention(gnn.MessagePassing):
+class SpatialAttention(gnn.MessagePassing):
     def __init__(
         self,
         in_channels: int,
@@ -30,12 +30,31 @@ class SpatialSelfAttention(gnn.MessagePassing):
         self.lin_pos = nn.Linear(pos_dim, out_channels * heads, bias=False)
 
     def forward(
-        self, x: torch.Tensor, pos: torch.Tensor, edge_index: Adj
+        self,
+        x: torch.Tensor | PairTensor,
+        pos: torch.Tensor | PairTensor,
+        edge_index: Adj,
     ) -> torch.Tensor:
-        query = self.lin_q(x)
-        key = self.lin_k(x)
-        value = self.lin_v(x)
-        out = self.propagate(edge_index, query=query, key=key, value=value, pos=pos)
+        """
+        Args:
+            x: Node features of shape (num_nodes, in_channels) or a tuple of tensors if bipartite.
+            pos: Node positions of shape (num_nodes, pos_dim) or a tuple of tensors if bipartite.
+            edge_index: Tensor or sparse matrix representing the (bipartite) graph structure.
+        """
+
+        if isinstance(x, torch.Tensor):
+            x = (x, x)
+        if isinstance(pos, torch.Tensor):
+            pos = (pos, pos)
+
+        query = self.lin_q(x[1])
+        key = self.lin_k(x[0])
+        value = self.lin_v(x[0])
+        size = (x[0].shape[0], x[1].shape[0])
+
+        out = self.propagate(
+            edge_index, query=query, key=key, value=value, pos=pos, size=size
+        )
         return out
 
     def message(
@@ -49,6 +68,7 @@ class SpatialSelfAttention(gnn.MessagePassing):
         ptr: OptTensor,
         size_i: Optional[int],
     ) -> torch.Tensor:
+        # _i denotes target nodes, _j denotes source nodes
         # add positional encoding
         key_j += self.lin_pos(pos_i - pos_j)
         # reshape to separate heads and channels
@@ -59,7 +79,7 @@ class SpatialSelfAttention(gnn.MessagePassing):
         alpha = (
             torch.einsum("...hc,...hc->...h", query_i, key_j) / self.out_channels**0.5
         )
-        # compute attention coefficients along the first dimension
+        # softmax implementation from torch_geometric
         alpha = softmax(alpha, index, ptr, size_i, dim=0)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
         out = value_j * alpha.view(-1, self.heads, 1)
