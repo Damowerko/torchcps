@@ -7,10 +7,15 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11,<3.12"
-pytorch-lightning = ">=2.0.0"
+pytorch-lightning = "^2.1.3"
+torch = "^2.1.2"
+torch-geometric = "^2.4.0"
+pyg-lib = "^0.3.1+pt21cu121"
+torch-scatter = "^2.1.2+pt21cu121"
+torch-sparse = "^0.6.18+pt21cu121"
+torch-cluster = "^1.6.3+pt21cu121"
+torch-spline-conv = "^1.2.2+pt21cu121"
 numpy = "^1.25.1"
-torch = {version = "=2.0.0"}
-torch-geometric = {version = "^2.3.1"}
 pykeops = "^2.1.2"
 matplotlib = ">=3.0.0"
 seaborn = ">=0.12.0"
@@ -18,8 +23,6 @@ tqdm = "4.*"
 pandas = "2.*"
 scipy = "1.*"
 scikit-learn = "^1.3.0"
-torch-sparse = "^0.6.17+pt20cu118"
-torch-cluster = "^1.6.3+pt20cu118"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -33,7 +36,7 @@ priority = "supplemental"
 
 [[tool.poetry.source]]
 name = "pyg"
-url = "https://data.pyg.org/whl/torch-2.0.0+cu118.html"
+url = "https://data.pyg.org/whl/torch-2.1.0+cu121.html"
 priority = "primary"
 
 [build-system]
