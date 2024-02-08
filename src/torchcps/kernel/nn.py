@@ -3,68 +3,96 @@ from typing import Callable, NamedTuple
 import torch
 import torch.linalg
 import torch.nn as nn
-from pykeops.torch import LazyTensor
+from pykeops.torch import KernelSolve, LazyTensor
+from pykeops.torch.cluster import (
+    cluster_ranges_centroids,
+    from_matrix,
+    grid_cluster,
+    sort_clusters,
+)
 
-from .rkhs import Kernel, Mixture
+from .rkhs import GaussianKernel, Kernel, Mixture
 
 
 class KernelConv(nn.Module):
-    """
-    RKHS Convolutional Layer based on [1]. Signals are represented by $s(t) = \\sum_{i=1}^N a_i k(t_i,t)$, where $k$ is the kernel function and $a_i$ is the weight.
-    The filters are similarly RKHS functions meaning that convolutions are computed as $\\sum_{i,j} a_i b_i k(t_i + t_j, t)$.
-
-    [1] NONLINEAR SIGNAL PROCESSING OF CONTINUOUS-TIME SIGNALS VIA ALGEBRAIC NEURAL NETWORKS IN REPRODUCING KERNEL HILBERT SPACES.
-
-    """
-
-    def __init__(
-        self,
-        filter_kernels: int,
+    @staticmethod
+    def _grid_positions(
+        max_filter_kernels: int,
         in_channels: int,
         out_channels: int,
         n_dimensions: int,
         kernel_spread: float = 1.0,
-        fixed_positions: bool = False,
-        n_weights: int = 1,
     ):
         """
-        Args:
-            filter_kernels: number of kernels per filter
-            in_channels: number of input channels
-            out_channels: number of output channels
-            n_dimensions: number of spatial dimensions
-            kernel_width: width of the filter, i.e. how far away are the kernels positioned
-            fixed_positions: if True, the kernel positions are fixed and spread out in a grid
-        """
-        super().__init__()
+        Arrange the kernels in a n-dimensional hypergrid.
 
-        if fixed_positions:
-            n_kernels_per_dimension = int(round(filter_kernels ** (1 / n_dimensions)))
-            # make sure the kernel width is odd
-            if n_kernels_per_dimension % 2 == 0:
-                n_kernels_per_dimension += 1
-            # spread the kernels out in a grid
-            kernel_positions = kernel_spread * torch.linspace(
-                n_kernels_per_dimension / 2,
-                -n_kernels_per_dimension / 2,
-                n_kernels_per_dimension,
-            )
-            # (kernel_width ** n_dimensions, 1, 1, n_dimensions)
-            kernel_positions = torch.stack(
-                torch.meshgrid(*([kernel_positions] * n_dimensions)), dim=-1
-            ).reshape(1, 1, -1, n_dimensions)
-            # (in_channels, out_channels, kernel_width ** n_dimensions, n_dimensions)
-            kernel_positions = kernel_positions.expand(
-                in_channels, out_channels, kernel_positions.shape[2], n_dimensions
-            )
-            self.kernel_positions = nn.Parameter(kernel_positions, requires_grad=False)
-            filter_kernels = self.kernel_positions.shape[2]
-        else:
-            self.kernel_positions = nn.Parameter(
-                2
-                * kernel_spread
-                * torch.randn((in_channels, out_channels, filter_kernels, n_dimensions))
-            )
+        The number of kernels per dimension is determined by `(max_filter_kernels)**(1/n_dimensions)`.
+
+        Args:
+            max_filter_kernels: maximum number of kernels per filter
+        """
+        n_kernels_per_dimension = int(max_filter_kernels ** (1 / n_dimensions))
+        # make sure the kernel width is odd
+        if n_kernels_per_dimension % 2 == 0:
+            n_kernels_per_dimension -= 1
+        # spread the kernels out in a grid
+        kernel_positions = kernel_spread * torch.linspace(
+            n_kernels_per_dimension / 2,
+            -n_kernels_per_dimension / 2,
+            n_kernels_per_dimension,
+        )
+        # (kernel_width ** n_dimensions, 1, 1, n_dimensions)
+        kernel_positions = torch.stack(
+            torch.meshgrid(*([kernel_positions] * n_dimensions)), dim=-1
+        ).reshape(1, 1, -1, n_dimensions)
+        # (in_channels, out_channels, kernel_width ** n_dimensions, n_dimensions)
+        kernel_positions = kernel_positions.expand(
+            in_channels, out_channels, kernel_positions.shape[2], n_dimensions
+        )
+        return kernel_positions
+
+    @staticmethod
+    def _uniform_positions(
+        max_filter_kernels: int,
+        in_channels: int,
+        out_channels: int,
+        n_dimensions: int,
+        kernel_spread: float = 1.0,
+    ):
+        x = torch.rand((in_channels, out_channels, max_filter_kernels, n_dimensions))
+        kernel_positions = kernel_spread * (x - 0.5)
+        return kernel_positions
+
+    def __init__(
+        self,
+        max_filter_kernels: int,
+        in_channels: int,
+        out_channels: int,
+        n_dimensions: int,
+        kernel_spread: float = 1.0,
+        update_positions: bool = True,
+        n_weights: int = 1,
+        kernel_init: str = "uniform",
+    ):
+        super().__init__()
+        # initialize kernel positions
+        kernel_init_fn = {
+            "grid": self._grid_positions,
+            "uniform": self._uniform_positions,
+        }[kernel_init]
+        self.kernel_positions = nn.Parameter(
+            kernel_init_fn(
+                max_filter_kernels,
+                in_channels,
+                out_channels,
+                n_dimensions,
+                kernel_spread,
+            ),
+            requires_grad=update_positions,
+        )
+        # initialize kernel weights
+        # the actual number of filter kernels might be smaller than the maximum
+        filter_kernels = self.kernel_positions.shape[2]
         self.kernel_weights = nn.Parameter(
             torch.empty(in_channels, out_channels, filter_kernels, n_weights)
         )
@@ -160,6 +188,22 @@ class KernelGraphFilter(nn.Module):
         """
         batch_size, n_channels, in_kernels, in_weights = input.weights.shape
 
+        # x = input.positions
+        # w = input.weights
+        # # Cluster the input positions for block-sparse reduction
+        # eps = 1.0  # the grid size
+        # x_labels = grid_cluster(x, eps)  # class labels
+        # x_ranges, x_centroids, _ = cluster_ranges_centroids(x, x_labels, input.weights)
+        # (x, w), x_labels = sort_clusters((x, w), x_labels)
+
+        # # Compute a boolean mask that indicates which centroids are close to each other
+        # D = ((x_centroids[:, None, :] - x_centroids[None, :, :]) ** 2).sum(2)
+        # assert isinstance(
+        #     self.kernel, GaussianKernel
+        # ), "Only Gaussian kernel implemented."
+        # keep = D < (4 * self.kernel.sigma) ** 2
+        # ranges_ij = from_matrix(x_ranges, x_ranges, keep)
+
         # The kernel matrix is the GSO
         # Will contain self-loops by definition
         S = self.kernel(input.positions, input.positions)
@@ -200,6 +244,9 @@ class KernelMap(nn.Module):
             transformation: function to apply to the kernel weights.
                 input -> (batch_size, in_channels, in_kernels, in_weights)
                 output -> (batch_size, in_channels, in_kernels, in_weights)
+            over:
+                "positions": apply the transformation to the positions
+                "weights": apply the transformation to the weights
         """
 
         super().__init__()
@@ -222,7 +269,7 @@ class KernelNorm(nn.Module):
         super().__init__()
         self.n_channels = n_channels
         self.n_weights = n_weights
-        self.batch_norm = nn.BatchNorm1d(n_channels * n_weights)
+        self.batch_norm = nn.InstanceNorm1d(n_channels * n_weights)
 
     def forward(self, input: Mixture):
         """
@@ -242,12 +289,46 @@ class KernelNorm(nn.Module):
             batch_size, n_channels * n_weights, in_kernels
         )
         weights = self.batch_norm(weights)
-        weights = (
-            weights.reshape(batch_size, n_channels, n_weights, in_kernels)
-            .transpose(2, 3)
-            .clone()
-        )
+        weights = weights.reshape(
+            batch_size, n_channels, n_weights, in_kernels
+        ).transpose(2, 3)
         return Mixture(input.positions, weights)
+
+
+class KernelSample(nn.Module):
+    def __init__(
+        self,
+        kernel: Kernel = GaussianKernel(1.0),
+        nonlinearity: nn.Module | None = None,
+        alpha: float | None = None,
+    ):
+        """
+        Sample the kernel at the output positions according to $ w_j = \\sum_i w_i K_{ij} $. Optionally solve the system $ (K + \\alpha I) w = z $.
+
+        Args:
+            kernel: kernel function
+            nonlinearity: nonlinearity to apply to the kernel weights
+            alpha: If provided then then the kernel weights are recomputed as $(K + \\alpha I)^{-1} z$. Otherwise, the kernel is merely sample.
+        """
+
+        super().__init__()
+        self.kernel = kernel
+        self.alpha = alpha
+        self.nonlinearity = nonlinearity
+
+    def forward(self, input: Mixture, output_positions: torch.Tensor):
+        """
+        Args:
+            input_positions: (batch_size, channels, in_kernels, n_dimensions)
+            input_weights: (batch_size, channels, in_kernels, n_weights)
+            output_positions: (batch_size, channels, out_kernels, n_dimensions)
+        """
+        samples = sample_kernel(input, output_positions, self.kernel, self.nonlinearity)
+        if self.alpha is None:
+            return samples
+
+        solution = solve_kernel(samples, self.kernel, self.alpha)
+        return solution
 
 
 class KernelPool(nn.Module):
@@ -393,6 +474,34 @@ class KernelPool(nn.Module):
         return best_indices
 
 
+def sample_kernel(
+    input: Mixture,
+    output_positions: torch.Tensor,
+    kernel: Kernel,
+    nonlinearity: Callable | None = None,
+):
+    # sample kernel at output positions
+    # (batch_size, channels, out_kernels, in_kernels)
+    samples = kernel(output_positions, input.positions) @ input.weights
+    if nonlinearity is not None:
+        samples = nonlinearity(samples)
+    return Mixture(output_positions, samples)
+
+
+def solve_kernel(
+    samples: Mixture,
+    kernel: Kernel,
+    alpha=1e-3,
+):
+    K = kernel(samples.positions, samples.positions)
+    if isinstance(K, torch.Tensor):
+        raise NotImplementedError()
+    assert 0 not in K.shape, f"K is not invertible with shape: {K.shape}"
+    weights = K.solve(LazyTensor(samples.weights[..., :, None, :]), alpha=alpha)
+    assert isinstance(weights, torch.Tensor)
+    return Mixture(samples.positions, weights)
+
+
 def fit_kernel_weights(
     input_positions: torch.Tensor,
     input_weights: torch.Tensor,
@@ -429,16 +538,11 @@ def fit_kernel_weights(
         n_dimensions,
     ), f"{output_positions.shape} != {(batch_size, channels, out_kernels, n_dimensions)}"
 
-    # sample kernel at output positions
-    # (batch_size, channels, out_kernels, in_kernels)
-    samples = kernel(output_positions, input_positions) @ input_weights
-    if nonlinearity is not None:
-        samples = nonlinearity(samples)
-
-    K = kernel(output_positions, output_positions)
-    if isinstance(K, torch.Tensor):
-        raise NotImplementedError()
-    assert 0 not in K.shape, f"K is not invertible with shape: {K.shape}"
-    weights = K.solve(LazyTensor(samples[..., :, None, :]), alpha=alpha)
-    assert isinstance(weights, torch.Tensor)
-    return weights
+    samples = sample_kernel(
+        Mixture(input_positions, input_weights),
+        output_positions,
+        kernel,
+        nonlinearity,
+    )
+    solution = solve_kernel(samples, kernel, alpha=alpha)
+    return solution.weights

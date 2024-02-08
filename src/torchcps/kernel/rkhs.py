@@ -129,13 +129,16 @@ class GaussianKernel(Kernel):
             If the inputs are vectors the output is a scalar.
             If the inputs (batched) tensors (..., N, n_dimensions) and (..., M, n_dimensions) the output is a tensor of shape (..., N, M).
         """
+        n_dimensions = x.shape[-1]
         assert len(x.shape) == len(y.shape)
         if len(x.shape) == 1 or (x.shape[-2] == 1 and y.shape[-2] == 1):
             return torch.exp(-((x - y) ** 2).sum(-1) / (2 * self.sigma**2))[..., None]
 
         x_i = LazyTensor(x[..., :, None, :])
         y_j = LazyTensor(y[..., None, :, :])
-        K_ij: LazyTensor = (-((x_i - y_j) ** 2).sum(-1) / (2 * self.sigma**2)).exp()
+        K_ij: LazyTensor = (
+            -((x_i - y_j) ** 2).sum(-1) / (2 * self.sigma**2)
+        ).exp() / (self.sigma * (2 * torch.pi) ** (n_dimensions / 2))
         return K_ij
 
 
