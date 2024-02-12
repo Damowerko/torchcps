@@ -1,15 +1,9 @@
-from typing import Callable, NamedTuple
+from typing import Callable
 
 import torch
 import torch.linalg
 import torch.nn as nn
-from pykeops.torch import KernelSolve, LazyTensor
-from pykeops.torch.cluster import (
-    cluster_ranges_centroids,
-    from_matrix,
-    grid_cluster,
-    sort_clusters,
-)
+from pykeops.torch import LazyTensor
 
 from .rkhs import GaussianKernel, Kernel, Mixture
 
@@ -546,3 +540,86 @@ def fit_kernel_weights(
     )
     solution = solve_kernel(samples, kernel, alpha=alpha)
     return solution.weights
+
+
+class KNN(nn.Module):
+    def __init__(
+        self,
+        in_weights: int,
+        out_weights: int,
+        n_weights: int,
+        n_layers: int,
+        n_channels: int,
+        sigma: float,
+        max_filter_kernels: int,
+        update_positions: bool,
+    ):
+        super().__init__()
+        self.n_layers = n_layers
+        self.n_channels = n_channels
+
+        self.layers = nn.ModuleList(
+            [nn.Linear(n_channels, n_channels) for _ in range(n_layers)]
+        )
+
+        self.nonlinearity = KernelMap(nn.LeakyReLU())
+        self.readin = KernelMap(nn.Linear(in_weights, n_weights))
+        self.readout = KernelMap(nn.Linear(n_weights, out_weights))
+
+        conv_layers = []
+        norm_layers = []
+        linear_layers = []
+        sample_layers = []
+        for l in range(self.n_layers):
+            first_layer = l == 0
+            last_layer = l == self.n_layers - 1
+            conv_layers += [
+                KernelConv(
+                    max_filter_kernels=max_filter_kernels,
+                    in_channels=1 if first_layer else n_channels,
+                    out_channels=1 if last_layer else n_channels,
+                    n_dimensions=2,
+                    kernel_spread=3 * sigma * max_filter_kernels**0.5,
+                    n_weights=n_weights,
+                    update_positions=update_positions,
+                    kernel_init="uniform",
+                )
+            ]
+            linear_layers += [KernelMap(nn.Linear(n_weights, n_weights))]
+            norm_layers += [KernelNorm(1 if last_layer else n_channels, n_weights)]
+            sample_layers += [
+                KernelSample(
+                    kernel=GaussianKernel(sigma),
+                    alpha=None,
+                    nonlinearity=nn.LeakyReLU(),
+                )
+            ]
+
+        self.conv_layers = nn.ModuleList(conv_layers)
+        self.norm_layers = nn.ModuleList(norm_layers)
+        self.linear_layers = nn.ModuleList(linear_layers)
+        self.sample_layers = nn.ModuleList(sample_layers)
+
+    def forward(
+        self,
+        input: Mixture,
+        output_positions: torch.Tensor,
+    ):
+        x: Mixture = self.readin(input)
+        x = self.nonlinearity(x)
+        for l in range(self.n_layers):
+            h = x.weights
+            x = self.conv_layers[l](x)
+            # sample on input positions for all layers except the last
+            x = Mixture(x.positions.contiguous(), x.weights.contiguous())
+            x = self.sample_layers[l](x, output_positions)
+            x = self.linear_layers[l](x)
+            x = self.norm_layers[l](x)
+            x = self.nonlinearity(x)
+            # residual connection
+            if l > 0:
+                x = Mixture(x.positions, x.weights + h)
+
+        x = self.readout(x)
+        x = self.nonlinearity(x)
+        return x
