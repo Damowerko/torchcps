@@ -28,7 +28,7 @@ class GraphFilter(nn.Module):
         """
         Computes a polynomial MIMO graph filters. The input and output signals can have a different number of channels.
         .. math::
-            \mathbf{y} = \sum_{k=0}^{K} W_k S^k \mathbf{x
+            \\mathbf{y} = \\sum_{k=0}^{K} W_k S^k \\mathbf{x}
 
         Args:
             in_channels: Number of input channels.
@@ -402,17 +402,19 @@ class GAT(nn.Module):
                         "x, edge_index, edge_weights -> x",
                     ),
                     (
-                        gnn.MLP(
-                            in_channels=n_channels * heads,
-                            hidden_channels=mlp_hidden_channels,
-                            out_channels=n_channels * heads,
-                            num_layers=mlp_per_gnn_layers,
-                            dropout=dropout,
-                            act=activation,
-                            plain_last=True,
-                        )
-                        if mlp_per_gnn_layers > 0
-                        else nn.Identity(),
+                        (
+                            gnn.MLP(
+                                in_channels=n_channels * heads,
+                                hidden_channels=mlp_hidden_channels,
+                                out_channels=n_channels * heads,
+                                num_layers=mlp_per_gnn_layers,
+                                dropout=dropout,
+                                act=activation,
+                                plain_last=True,
+                            )
+                            if mlp_per_gnn_layers > 0
+                            else nn.Identity()
+                        ),
                         "x -> x",
                     ),
                 ],
