@@ -7,7 +7,7 @@ import torch.nn as nn
 from pykeops.torch import LazyTensor
 from torch_geometric.nn import MLP
 
-from .rkhs import GaussianKernel, Kernel, Mixture
+from torchcps.kernel.rkhs import GaussianKernel, Kernel, Mixture
 
 
 class KernelConv(nn.Module):
