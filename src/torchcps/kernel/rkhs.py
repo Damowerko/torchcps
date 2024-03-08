@@ -219,9 +219,11 @@ class GaussianKernel(Kernel):
         assert len(x.shape) == len(y.shape)
         x_i = LazyTensor(x[..., :, None, :])
         y_j = LazyTensor(y[..., None, :, :])
-        K_ij: LazyTensor = (
-            -((x_i - y_j) ** 2).sum(-1) / (2 * self.sigma**2)
-        ).exp() / (self.sigma * (2 * torch.pi) ** (n_dimensions / 2))
+
+        distance: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
+        K_ij: LazyTensor = (-distance / (2 * self.sigma**2)).exp()
+        # normalize the kernel
+        K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
         return K_ij
 
 
