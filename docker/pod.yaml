@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: torchcps-pod
+spec:
+  containers:
+    - name: torchcps-container
+      image: damowerko/torchcps
+      command: ["bash"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+      stdin: true
+      tty: true
