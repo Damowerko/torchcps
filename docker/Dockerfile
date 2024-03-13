@@ -19,6 +19,7 @@ RUN wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_6
 
 # Set CUDA environment variables
 ENV CUDA_HOME=/usr/local/cuda
+ENV CUDA_PATH=${CUDA_HOME}
 ENV PATH=${CUDA_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 
