@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim-bullseye
 
 ARG USERNAME=default
 ARG USER_UID=1000
@@ -9,12 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # install cuda
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb \
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb \
     && dpkg -i cuda-keyring_1.1-1_all.deb \
     && rm cuda-keyring_1.1-1_all.deb \
     && add-apt-repository contrib \
     && apt-get update \
-    && apt-get -y install cuda-toolkit-12-4 \
+    && apt-get -y install cuda-toolkit-12-2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set CUDA environment variables
