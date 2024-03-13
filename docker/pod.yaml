@@ -3,12 +3,14 @@ kind: Pod
 metadata:
   name: torchcps-pod
 spec:
+  nodeName: sa1.alelab
   containers:
     - name: torchcps-container
       image: damowerko/torchcps
       command: ["bash"]
+      args: ["-c", "bash"]
       resources:
         limits:
           nvidia.com/gpu: 1
-      stdin: true
       tty: true
+      stdin: true
