@@ -26,8 +26,9 @@ ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 RUN groupadd --gid $USER_GID $USERNAME && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME -s /bin/bash
 
 USER $USERNAME
+ENV HOME /home/$USERNAME
+ENV USER $USERNAME
 ENV PATH="/home/$USERNAME/.local/bin:${PATH}"
-WORKDIR /home/$USERNAME/workspace
 
 ENV VIRTUAL_ENV=/home/$USERNAME/venv
 RUN python3 -m venv $VIRTUAL_ENV
