@@ -407,15 +407,13 @@ class KNNBlock(nn.Module):
         conv: KernelConv,
         sample: KernelSample,
         norm: nn.Module,
-        weights_module: nn.Module,
-        position_module: nn.Module,
+        delta_module: nn.Module,
     ):
         super().__init__()
         self.conv = conv
         self.sample = sample
         self.norm = norm
-        self.weights_module = weights_module
-        self.position_module = position_module
+        self.delta_module = delta_module
 
     def forward(
         self,
@@ -427,8 +425,10 @@ class KNNBlock(nn.Module):
         y = self.sample.forward(y, x.positions, x.batch)
 
         # pointwise update of the kernel weights and positions
-        delta_positions = self.position_module.forward(y.weights)
-        delta_weights = self.weights_module.forward(y.weights)
+        delta_out = self.delta_module.forward(x.weights)
+        delta_positions, delta_weights = torch.split(
+            delta_out, [x.positions.shape[-1], x.weights.shape[-1]], dim=-1
+        )
         y = Mixture(
             x.positions + delta_positions,
             x.weights + delta_weights,
@@ -485,7 +485,7 @@ class KNN(nn.Module):
                         in_channels=hidden_channels,
                         out_channels=hidden_channels,
                         n_dimensions=n_dimensions,
-                        kernel_spread=3 * sigma[l] * max_filter_kernels**0.5,
+                        kernel_spread=sigma[l] * max_filter_kernels**0.5,
                         update_positions=update_positions,
                         kernel_init="uniform",
                     ),
@@ -495,19 +495,10 @@ class KNN(nn.Module):
                         nonlinearity=nn.LeakyReLU(),
                     ),
                     norm=nn.BatchNorm1d(hidden_channels),
-                    weights_module=MLP(
+                    delta_module=MLP(
                         in_channels=hidden_channels,
                         hidden_channels=hidden_channels_mlp,
-                        out_channels=hidden_channels,
-                        num_layers=n_layers_mlp,
-                        act=self.nonlinearity,
-                        norm="batch_norm",
-                        plain_last=True,
-                    ),
-                    position_module=MLP(
-                        in_channels=hidden_channels,
-                        hidden_channels=hidden_channels_mlp,
-                        out_channels=n_dimensions,
+                        out_channels=hidden_channels + n_dimensions,
                         num_layers=n_layers_mlp,
                         act=self.nonlinearity,
                         norm="batch_norm",
