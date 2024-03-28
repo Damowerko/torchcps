@@ -38,7 +38,7 @@ class KernelConv(nn.Module):
         # (n_kernels_per_dimension ** n_dimensions, n_dimensions)
         kernel_positions = torch.stack(
             torch.meshgrid(*([kernel_positions] * n_dimensions)), dim=-1
-        )
+        ).reshape(-1, n_dimensions)
         return kernel_positions
 
     @staticmethod
@@ -47,8 +47,9 @@ class KernelConv(nn.Module):
         n_dimensions: int,
         kernel_spread: float = 1.0,
     ):
+        n_kernels_per_dimension = max_filter_kernels ** (1 / n_dimensions)
         x = torch.rand((max_filter_kernels, n_dimensions))
-        kernel_positions = kernel_spread * (x - 0.5)
+        kernel_positions = n_kernels_per_dimension * kernel_spread * (x - 0.5)
         return kernel_positions
 
     def __init__(
@@ -451,6 +452,7 @@ class KNN(nn.Module):
         max_filter_kernels: int,
         update_positions: bool,
         alpha: float | None = None,
+        kernel_init: str = "uniform",
     ):
         super().__init__()
         self.n_layers = n_layers
@@ -485,9 +487,9 @@ class KNN(nn.Module):
                         in_channels=hidden_channels,
                         out_channels=hidden_channels,
                         n_dimensions=n_dimensions,
-                        kernel_spread=sigma[l] * max_filter_kernels**0.5,
+                        kernel_spread=sigma[l],
                         update_positions=update_positions,
-                        kernel_init="uniform",
+                        kernel_init=kernel_init,
                     ),
                     sample=KernelSample(
                         kernel=GaussianKernel(sigma[l]),
