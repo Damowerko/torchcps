@@ -206,6 +206,7 @@ class KernelSample(nn.Module):
         kernel: Kernel = GaussianKernel(1.0),
         nonlinearity: nn.Module | None = None,
         alpha: float | None = None,
+        normalize: bool = False,
     ):
         """
         Sample the kernel at the output positions according to $ w_j = \\sum_i w_i K_{ij} $. Optionally solve the system $ (K + \\alpha I) w = z $.
@@ -220,6 +221,7 @@ class KernelSample(nn.Module):
         self.kernel = kernel
         self.alpha = alpha
         self.nonlinearity = nonlinearity
+        self.normalize = normalize
 
     def forward(
         self,
@@ -242,6 +244,7 @@ class KernelSample(nn.Module):
             output_positions,
             output_batch=output_batch,
             nonlinearity=self.nonlinearity,
+            normalize=self.normalize,
         )
         if self.alpha is None:
             return sample
@@ -256,6 +259,7 @@ def sample_kernel(
     output_positions: torch.Tensor,
     output_batch: torch.Tensor | None = None,
     nonlinearity: Callable | None = None,
+    normalize: bool = False,
 ):
     """
     Sample the kernel at the given output positions.
@@ -269,6 +273,7 @@ def sample_kernel(
         output_positions (torch.Tensor): The output positions.
         output_batch (torch.Tensor, optional): The output batch tensor. Defaults to None.
         nonlinearity (Callable, optional): The nonlinearity function. Defaults to None.
+        normalize (bool, optional): Whether to normalize the kernel weights. Defaults to False.
 
     Returns:
         Mixture: The resulting mixture.
@@ -282,6 +287,8 @@ def sample_kernel(
         input_batch,
     )
     samples = K_ij @ input_weights
+    if normalize:
+        samples = samples / K_ij.sum(1)
     if nonlinearity is not None:
         samples = nonlinearity(samples)
     return Mixture(output_positions, samples, output_batch)
