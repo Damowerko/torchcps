@@ -1,3 +1,4 @@
+import math
 import typing
 from abc import ABC, abstractmethod
 from typing import NamedTuple
@@ -220,8 +221,8 @@ class GaussianKernel(Kernel):
         x_i = LazyTensor(x[..., :, None, :])
         y_j = LazyTensor(y[..., None, :, :])
 
-        distance: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
-        K_ij: LazyTensor = (-distance / (2 * self.sigma**2)).exp()
+        D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
+        K_ij: LazyTensor = (-D_ij / (2 * self.sigma**2)).exp()
         # normalize the kernel
         K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
         return K_ij
@@ -252,7 +253,7 @@ class RQKernel(Kernel):
         y_j = LazyTensor(y[..., None, :, :])
 
         D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
-        K_ij: LazyTensor = (1 + D_ij**2 / (2 * self.alpha * self.sigma**2)) ** (
+        K_ij: LazyTensor = (1 + D_ij / (2 * self.alpha * self.sigma**2)) ** (
             -self.alpha
         )
         return K_ij
@@ -283,6 +284,26 @@ class SincKernel(Kernel):
 
         D_ij: LazyTensor = ((x_i - y_j) ** 2 / self.sigma**2).sum(-1)
         K_ij: LazyTensor = D_ij.sinc()
+        return K_ij
+
+
+class LaplacianKernel(Kernel):
+    def __init__(self, sigma: float = 1.0):
+        self.sigma = sigma
+
+    def _kernel(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+    ) -> LazyTensor:
+        assert len(x.shape) == len(y.shape)
+        x_i = LazyTensor(x[..., :, None, :])
+        y_j = LazyTensor(y[..., None, :, :])
+
+        D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
+        K_ij: LazyTensor = (-D_ij / (2 * self.sigma**2)).exp()
+        K_ij *= 1 - D_ij**2 / 2 * self.sigma**2
+        K_ij /= -math.pi * self.sigma**4
         return K_ij
 
 
