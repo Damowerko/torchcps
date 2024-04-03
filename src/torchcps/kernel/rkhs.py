@@ -227,6 +227,37 @@ class GaussianKernel(Kernel):
         return K_ij
 
 
+class RQKernel(Kernel):
+    def __init__(self, sigma: float = 1.0, alpha: float = 1.0):
+        self.sigma = sigma
+        self.alpha = alpha
+
+    def _kernel(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+    ) -> LazyTensor:
+        """
+        Compute the Gaussian kernel between two tensors.
+
+        Args:
+            x: (..., n_dimensions)
+            y: (..., n_dimensions)
+        Returns:
+            If the inputs are vectors the output is a scalar.
+            If the inputs (batched) tensors (..., N, n_dimensions) and (..., M, n_dimensions) the output is a tensor of shape (..., N, M).
+        """
+        assert len(x.shape) == len(y.shape)
+        x_i = LazyTensor(x[..., :, None, :])
+        y_j = LazyTensor(y[..., None, :, :])
+
+        D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
+        K_ij: LazyTensor = (1 + D_ij**2 / (2 * self.alpha * self.sigma**2)) ** (
+            -self.alpha
+        )
+        return K_ij
+
+
 def multivariate_gaussian_kernel(
     x_mean: torch.Tensor,
     x_cov_inv: torch.Tensor,
