@@ -65,7 +65,7 @@ class Kernel(ABC):
         y: torch.Tensor,
         x_batch: torch.Tensor | None = None,
         y_batch: torch.Tensor | None = None,
-    ) -> torch.Tensor | LazyTensor:
+    ) -> LazyTensor:
         return self.kernel(x, y, x_batch, y_batch)
 
     def kernel(
@@ -74,7 +74,7 @@ class Kernel(ABC):
         y: torch.Tensor,
         x_batch: torch.Tensor | None = None,
         y_batch: torch.Tensor | None = None,
-    ) -> torch.Tensor | LazyTensor:
+    ) -> LazyTensor:
         """
         Computes the kernel matrix between two sets of samples.
 
@@ -85,7 +85,7 @@ class Kernel(ABC):
             y_batch (torch.Tensor | None, optional): The batch information for y. Defaults to None.
 
         Returns:
-            torch.Tensor | LazyTensor: The kernel matrix between x and y.
+            LazyTensor: The kernel matrix between x and y.
 
         Raises:
             ValueError: If either x_batch or y_batch is provided without the other.
@@ -224,7 +224,7 @@ class GaussianKernel(Kernel):
         D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
         K_ij: LazyTensor = (-D_ij / (2 * self.sigma**2)).exp()
         # normalize the kernel
-        K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
+        # K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
         return K_ij
 
 
@@ -307,35 +307,22 @@ class LaplacianKernel(Kernel):
         return K_ij
 
 
-def multivariate_gaussian_kernel(
-    x_mean: torch.Tensor,
-    x_cov_inv: torch.Tensor,
-    y_mean: torch.Tensor,
-    y_cov_inv: torch.Tensor,
-):
+def projection(
+    kernel: Kernel, samples: torch.Tensor, x: torch.Tensor, y: torch.Tensor, alpha=1e-10
+) -> torch.Tensor:
     """
-    Inner product between two multivariate Gaussians.
-    Source: https://gregorygundersen.com/blog/2020/07/02/sum-quadratics/
+    Find the RKHS with centers at y that best approximates the samples at x.
 
     Args:
-        x_mean: (..., n_dimensions)
-        x_cov_inv: (..., n_dimensions, n_dimensions)
-        y_mean: (..., n_dimensions)
-        y_cov_inv: (..., n_dimensions, n_dimensions)
+        samples: (..., N, n_dimensions)
+        x: (..., N, n_dimensions)
+        y: (..., M, n_dimensions)
+        alpha: Regularization parameter.
 
     Returns:
-        If the inputs are vectors the output is a scalar.
-        If the inputs (batched) tensors (..., N, n_dimensions) and (..., M, n_dimensions) the output is a tensor of shape (..., N, M).
+        weights: (..., M, n_dimensions)
     """
-    cov_inv = x_cov_inv + y_cov_inv
-    m = x_cov_inv @ x_mean + y_cov_inv @ y_mean
-    R = x_mean.T @ x_cov_inv @ x_mean + y_mean.T @ y_cov_inv @ y_mean
-
-    # integral of the term that depends on x
-    dims = x_mean.shape[-1]
-    integral = (2 * torch.pi) ** (dims / 2) * torch.linalg.det(cov_inv) ** (-0.5)
-
-    # the constant term
-    # use solve to avoid computing the inverse
-    remainder = torch.exp(-0.5 * (R - m.T @ torch.linalg.solve(cov_inv, m)))
-    return integral * remainder
+    K_yx = kernel(x, y)
+    weights = K_yx.solve(samples, alpha=alpha)
+    assert isinstance(weights, torch.Tensor)
+    return weights
