@@ -1,0 +1,13 @@
+.pytest_cache/
+.vscode/
+data/
+# might be a symlink as well
+data
+docker/
+k8s/
+figures/
+logs/
+checkpoints/
+models/
+notebooks/
+test/
