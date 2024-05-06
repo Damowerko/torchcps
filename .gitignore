@@ -2,3 +2,5 @@
 *.pyc
 .python-version
 /data
+k8s/pod.yaml
+k8s/torchcps.sh
