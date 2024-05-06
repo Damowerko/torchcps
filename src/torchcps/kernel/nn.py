@@ -430,7 +430,7 @@ class KNNBlock(nn.Module):
         # convolution and sampling operation
         y = self.conv.forward(x)
         y = y.map_weights(self.norm)
-        y = self.sample.forward(y, x.positions, x.batch)
+        y = self.sample.forward(y, x.positions.contiguous(), x.batch)
 
         # pointwise update of the kernel weights and positions
         delta_out = self.delta_module.forward(x.weights)
