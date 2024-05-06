@@ -47,3 +47,7 @@ RUN pip install "torch==2.1.*"
 # install torchcps to preinstall dependencies
 COPY poetry.lock pyproject.toml README.md /home/$USERNAME/torchcps/
 RUN poetry install --directory=/home/$USERNAME/torchcps --no-root
+
+# copy the rest of the repository
+COPY . .
+RUN poetry install --only-root
