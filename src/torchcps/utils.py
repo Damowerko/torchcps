@@ -96,6 +96,5 @@ def make_trainer(project: str, params: argparse.Namespace, callbacks=[]) -> pl.T
         default_root_dir=".",
         profiler=profiler,
         fast_dev_run=params.fast_dev_run,
-        log_every_n_steps=1 if params.slim else 50,
         gradient_clip_val=params.grad_clip_val,
     )
