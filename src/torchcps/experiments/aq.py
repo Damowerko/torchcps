@@ -17,13 +17,7 @@ class AQModel(pl.LightningModule):
 
     def __init__(
         self,
-        window_size: int = 72,
-        sigma: float = 0.05,
-        hidden_channels: int = 512,
-        n_layers: int = 4,
-        n_layers_mlp: int = 2,
-        hidden_channels_mlp: int = 1024,
-        max_filter_kernels: int = 64,
+        window_size: int = 24,
         lr: float = 1e-4,
         weight_decay: float = 1e-8,
         **kwargs
@@ -31,9 +25,61 @@ class AQModel(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.window_size = window_size
-        self.sigma = sigma
         self.lr = lr
         self.weight_decay = weight_decay
+
+    def training_step(self, batch):
+        aq_data, _, _, _ = batch["original"]
+        y_hat = self.forward(batch)
+        y = aq_data[..., self.window_size :].view(y_hat.shape)
+        error = y_hat - y
+        # ignore missing values in aq_data
+        error = error[~torch.isnan(error)]
+        mse = error.pow(2).nanmean()
+        mae = error.abs().nanmean()
+        self.log("train/loss", mse, prog_bar=True)
+        self.log("train/rmse", mse.sqrt())
+        self.log("train/mae", mae, prog_bar=True)
+        return mse
+
+    def validation_step(self, batch, batch_idx):
+        aq_data, _, _, _ = batch["original"]
+        y = aq_data[..., self.window_size :]
+        y_hat = self.forward(batch).view(y.shape)
+        error = y_hat - y
+        # ignore missing values in aq_data
+        error = error[~torch.isnan(error)]
+        mse = error.pow(2).nanmean()
+        mae = error.abs().nanmean()
+        self.log("val/loss", mse, prog_bar=True)
+        self.log("val/rmse", mse.sqrt())
+        self.log("val/mae", mae, prog_bar=True)
+        return mse
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
+
+
+class AQ_KNN(AQModel):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
+
+    def __init__(
+        self,
+        sigma: float = 0.05,
+        hidden_channels: int = 512,
+        n_layers: int = 4,
+        n_layers_mlp: int = 2,
+        hidden_channels_mlp: int = 1024,
+        max_filter_kernels: int = 64,
+        **kwargs
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        self.sigma = sigma
         self.knn = KNN(
             n_dimensions=2,
             in_channels=6 * self.window_size,
@@ -78,53 +124,28 @@ class AQModel(pl.LightningModule):
         ).weights
         return y_hat
 
-    def training_step(self, batch):
-        aq_data, _, _, _ = batch["original"]
-        y_hat = self(batch)
-        y = aq_data[..., self.window_size :].view(y_hat.shape)
-        error = y_hat - y
-        # ignore missing values in aq_data
-        error = error[~torch.isnan(error)]
-        mse = error.pow(2).nanmean()
-        mae = error.abs().nanmean()
 
-        self.log("train/rmse", mse.sqrt(), prog_bar=True)
-        self.log("train/mae", mae, prog_bar=True)
+class AQ_GRU_KNN(AQModel):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
 
-        return mse
-
-    def validation_step(self, batch, batch_idx):
-        aq_data, _, _, _ = batch["original"]
-        y_hat = self(batch)
-        y = aq_data[..., self.window_size :].view(y_hat.shape)
-        error = y_hat - y
-        # ignore missing values in aq_data
-        error = error[~torch.isnan(error)]
-        mse = error.pow(2).nanmean()
-        mae = error.abs().nanmean()
-
-        self.log("val/rmse", mse.sqrt(), prog_bar=True)
-        self.log("val/mae", mae, prog_bar=True)
-
-        return mse
-
-    def configure_optimizers(self):
-        return torch.optim.AdamW(
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
-        )
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
 def train(params: argparse.Namespace):
-    model = AQModel(**vars(params))
+    model: AQModel = {
+        "knn": AQ_KNN,
+        "gru_knn": AQ_GRU_KNN,
+    }[
+        params.model
+    ](**vars(params))
     dm = BeijingDataModule(
-        window_size=params.window_size, rkhs=params.rkhs, sigma=params.sigma
+        window_size=params.window_size, rkhs=params.model == "knn", sigma=params.sigma
     )
     trainer = make_trainer("aq", params)
     trainer.fit(model, dm)
-
-
-def test(params):
-    raise NotImplementedError()
 
 
 if __name__ == "__main__":
@@ -132,27 +153,30 @@ if __name__ == "__main__":
 
     # parse arguments, first argument is either "train" or "test"
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="mode")
 
-    # train subparser
-    train_parser = subparsers.add_parser("train")
+    group = parser.add_argument_group("General")
+    group.add_argument("--notes", type=str, default="")
+    group.add_argument("--no_log", action="store_true")
 
-    group = train_parser.add_argument_group("Model")
-    AQModel.add_model_specific_args(group)
-
-    group = train_parser.add_argument_group("Trainer")
+    group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=100)
     group.add_argument("--patience", type=int, default=20)
     group.add_argument("--profiler", type=str, default=None)
     group.add_argument("--fast_dev_run", action="store_true")
     group.add_argument("--grad_clip_val", type=float, default=0)
 
-    # test subparser
-    test_parser = subparsers.add_parser("test")
+    subparsers = parser.add_subparsers(dest="model")
+
+    # train subparser
+    knn_parser = subparsers.add_parser("knn")
+    AQ_KNN.add_model_specific_args(knn_parser)
+
+    gru_knn_parser = subparsers.add_parser("gru_knn")
+    AQ_GRU_KNN.add_model_specific_args(gru_knn_parser)
 
     # run code
     args = parser.parse_args()
-    if args.mode == "train":
+    if args.model == "knn":
         train(args)
-    elif args.mode == "test":
-        test(args)
+    elif args.model == "gru_knn":
+        train(args)
