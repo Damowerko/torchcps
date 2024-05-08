@@ -148,7 +148,7 @@ def train(params: argparse.Namespace):
     trainer.fit(model, dm)
 
 
-if __name__ == "__main__":
+def main():
     torch.set_float32_matmul_precision("high")
 
     # parse arguments, first argument is either "train" or "test"
@@ -180,3 +180,7 @@ if __name__ == "__main__":
         train(args)
     elif args.model == "gru_knn":
         train(args)
+
+
+if __name__ == "__main__":
+    main()
