@@ -223,8 +223,10 @@ class GaussianKernel(Kernel):
 
         D_ij: LazyTensor = ((x_i - y_j) ** 2).sum(-1)
         K_ij: LazyTensor = (-D_ij / (2 * self.sigma**2)).exp()
+        # set K_ij to zero if the distance is too large
+        K_ij = (D_ij < 6 * self.sigma).ifelse(K_ij, 0.0)
         # normalize the kernel
-        # K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
+        K_ij /= self.sigma * (2 * torch.pi) ** (n_dimensions / 2)
         return K_ij
 
 
