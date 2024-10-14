@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-REGISTRY="lc1:32000"
+REGISTRY="docker.io"
 DOCKER_USER="damowerko"
 IMAGE_NAME="torchcps"
 IMAGE_TAG="latest"
