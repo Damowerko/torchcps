@@ -8,6 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
 pytorch-lightning = "^2.4.0"
+lightning = "^2.4.0"
 torch = "2.4.*"
 torch-geometric = "^2.6.1"
 pyg-lib = "^0.4.0+pt24cu124"
