@@ -14,7 +14,7 @@ RUN wget https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_6
     && rm cuda-keyring_1.1-1_all.deb \
     && add-apt-repository contrib \
     && apt-get update \
-    && apt-get -y install cuda-toolkit-12-2 \
+    && apt-get -y install cuda-toolkit-12-4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set CUDA environment variables
@@ -43,7 +43,7 @@ RUN curl -sSL https://install.python-poetry.org | python3 - \
     && poetry config virtualenvs.create false
 
 # install torchcps from github
-RUN pip install "torch==2.1.*"
+RUN pip install "torch==2.5.*"
 
 # install torchcps to preinstall dependencies
 COPY --chown=${USERNAME}:${USERNAME} poetry.lock pyproject.toml README.md /home/$USERNAME/torchcps/
