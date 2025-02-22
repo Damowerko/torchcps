@@ -37,7 +37,10 @@ def add_model_specific_args(cls, group):
         if type not in (int, float, str, bool):
             continue
         if type == bool:
-            group.add_argument(f"--{name}", dest=name, action="store_true")
+            if default is True:
+                group.add_argument(f"--no_{name}", dest=name, action="store_false")
+            else:
+                group.add_argument(f"--{name}", dest=name, action="store_true")
         else:
             group.add_argument(f"--{name}", type=type, default=default)
     return group
